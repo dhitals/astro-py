@@ -1,3 +1,8 @@
+
+# coding: utf-8
+
+# In[2]:
+
 """ Measure the radial velocity of WDs using the algorithm in Becker et al. (2015)
     Much more robust than XC, which is much more robust that any other algorithm 
     out there for WDs. Hard since there is ONE single Halpha line.
@@ -5,7 +10,7 @@
     Yields RVs w/ posteriot dist. stddev of 5-10 km/s. 
     Mostly consistent across different epochs.
     
-    Written by: Saurav Dhital, Dan (June 2015)
+    Written by: Saurav Dhital, Ben Johnson (June 2015)
 """
 import glob
 import numpy as np
@@ -13,84 +18,17 @@ import matplotlib.pyplot as pl
 import atpy
 import emcee
 from emcee.utils import sample_ball
-from astropysics.coords import AngularCoordinate
-from PyAstronomy import pyasl
 from astropy.io import fits
 
+from rvutils import *
+
 c = 2.99792458e5 # speed of light in km/s
+
 niter = 1e3  # Number of mcmc iterations
 nwalk = 256  # Number of emcee `walkers'
+
 gwave = (6500, 6600) # wave range to run the fit over
 
-def deg2rad(degrees):
-    return degrees*pi/180.
-
-def rad2deg(radians):
-    return radians*180./pi
-
-def wave_helio(wave, hdr):
-    # coords for object -- current epoch
-    ra  = AngularCoordinate(hdr['RA'],sghms=True).degrees # read RA/DEC in degrees
-    dec = AngularCoordinate(hdr['DEC'],sghms=False).degrees
-
-    # get observatory coords and JD of observation
-    # use different ones for each observatory b/c their headers are different
-    # currently JD is start of exposure instead of middle --- worth fixing
-    if hdr['OBSERVAT'] == 'KPNO':
-        lon, lat, alt, tz = 111.600, +31.9633, 2120, 7
-        jd = np.double(hdr['JD'])
-    elif hdr['OBSERVAT'] == 'SOAR':
-        lon, lat, alt, tz = 70.7336, -30.2379, 2713., 4
-        t = Time(hdr['DATE-OBS'], format='isot', scale='utc')
-        jd = t.jd
-    elif hdr['OBSERVAT'] == 'MMTO':
-        lon, lat, alt, tz = 110.885, +31.6883, 2600, 7
-        date = hdr['DATE-OBS']+'T'+hdr['UT']    # Time of observation
-        t = Time(date, format='isot', scale='utc')
-        jd = t.jd
-    
-    # Calculate barycentric correction (debug=True shows various intermediate results)
-    helio_corr, hjd = pyasl.helcorr(lon, lat, alt, ra, dec, jd, debug=False)
-
-    #gamma = sqrt( (1. + helio_corr/c) / (1. - helio_corr/c) )
-    #wave *= gamma
-    # print "Barycentric correction [km/s]: ", helio_corr
-    #print "Heliocentric Julian day: ", hjd
-
-    return helio_corr
-
-def readSpec(fname):
-    """ read a 1D IRAF-styped spectrum
-        return heliocentric wavelength
-        should include fluxing at some point
-        """
-    hdulist = fits.open(fname)
-    hdu = hdulist[0]
-    hdr = hdu.header
-    
-    flux = hdu.data
-    
-    # construct the wavelength array
-    wave = hdr['CRVAL1'] + hdr['CDELT1']*(np.arange(hdr['NAXIS1']) + 1.0 - hdr['CRPIX1'])
-
-    # does log-linear wave help for this method?
-    logWave = loglinear (wave)
-    logFlux = np.interp(logWave, wave, flux)
-
-    return (logWave, logFlux, hdr)
-
-def loglinear(lam):
-    R = lam[0] / (lam[1] - lam[0]) ## R = lambda / dlambda -- set to the lowest value in the cc_range
-    dv = c / R                     ## velocity resolution per pixel in km/s         
-
-    ## Why log-linear? dv/c = dlambda/lambda = (d/dl) log_lambda
-    step = (dv/c) * np.log10(np.exp(1))
-    nsteps = np.ceil( (np.log10(gwave[1]) - np.log10(gwave[0])) / step )  
-    
-    ## create the new wavelength array -- log-linear
-    logLam = np.logspace(np.log10(gwave[0]), np.log10(gwave[1]), nsteps)
-    
-    return logLam    
 
 class WDModel(object):
 
@@ -122,8 +60,8 @@ class WDModel(object):
         return (1.0 + poly) * norm
         
     def spec(self, rv, wave):
-        """Redshift the model spectrum and interpolate onto the
-        observed wavelength grid
+        """ Redshift the model spectrum and interpolate onto the
+            observed wavelength grid
         """
         a = 1 + rv/c
         flux = np.interp(wave, self.wave * a, self.flux)
@@ -163,6 +101,7 @@ def prior(rv, norm, snr, coeffs):
          return -np.inf
     else:
         return 0
+
 
 def measure_rv(wdnum):
     # center of the initial parameter guesses.  The parameters are
@@ -209,6 +148,10 @@ def measure_rv(wdnum):
             ax = axes.flat[j]
             for i in range(nwalk):
                 ax.plot(sampler.chain[i,:,j])
+
+        #fig.show()
+        #pl.figure()
+        #pl.hist(sampler.chain[:,500:,0].flat, range=(-150, 0), bins=100)
         
         # correct to heliocentric frame
         helio_corr = wave_helio(wave, hdr)
@@ -232,15 +175,14 @@ def measure_rv(wdnum):
         fout = fname[x:].replace('fits','png')
         pl.savefig(fout,format='png',dpi=100)
 
-###############################################################################################
 
 if __name__ == "__main__":
 
     wdms = atpy.Table('../grs.fits')
     print wdms.shape
     
-    #measure_rv('WD0810+234')
     for i, wdnum in enumerate(wdms.wdnum):
+        # measure_rv breaks for a bunch of different WDs. need to resolve
         if (i > 55): #wdnum.replace(' ','') != 'WD0810+234':
             print ''
             print i, wdnum
