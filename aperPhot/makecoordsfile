@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# grab the x, y coords from a .fwhm file into a .coords file
+
+if [ -a $1.coords ]
+then
+    mv $1.coords $1.coords.bak
+    echo "    Existing coords file moved to $1.coords.bak"
+fi
+
+echo "starNum   x   y" > $1.coords
+
+grep peak\= $1.fwhm | awk '{printf("%-5.3d%7.1f%9.1f\n"), NR, $3, $4}' >> $1.coords
+
+echo "    Coords file written to $1.coords"
+
+# also generate the cstar.lis and dstar.lis for comp.py
+awk '{print $1}' ref.PG1613+426.coords | grep -v star > cstar.lis
+cp cstar.lis dstar.lis
